@@ -23,6 +23,8 @@
     "migration:show": "typeorm -d dist/shared/database/data-source.js migration:show",
     "db:migrate:dev": "npm run build && cross-env NODE_ENV=development npm run migration:run",
     "db:migrate:test": "npm run build && cross-env NODE_ENV=test npm run migration:run",
+    "db:seed:dev": "npm run build && cross-env NODE_ENV=development node dist/database/seed/run-seed.js",
+    "db:seed:test": "npm run build && cross-env NODE_ENV=test node dist/database/seed/run-seed.js",
     "openapi:export": "cross-env NODE_ENV=development node dist/openapi/export-openapi.js"
   },
   "dependencies": {
@@ -31,6 +33,7 @@
     "@nestjs/core": "^10.4.15",
     "@nestjs/jwt": "^10.2.0",
     "@nestjs/platform-express": "^10.4.15",
+    "@nestjs/schedule": "^4.1.2",
     "@nestjs/swagger": "^8.1.0",
     "@nestjs/throttler": "^6.2.1",
     "@nestjs/typeorm": "^10.0.2",

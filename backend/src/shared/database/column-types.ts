@@ -30,9 +30,39 @@ export function timestampType(): ColumnType {
   return 'timestamp';
 }
 
+/**
+ * Calendar date without time (shift dates, as the IST date). Hydrated as 'YYYY-MM-DD'
+ * on both databases; Oracle DATE carries a time part, which is always midnight here.
+ */
+export function dateType(): ColumnType {
+  return 'date';
+}
+
 /** Integer column options (Oracle has no INTEGER type in TypeORM; NUMBER(10) is used). */
 export function intColumn(dbType?: string): Pick<ColumnOptions, 'type' | 'precision'> {
   return isOracle(dbType) ? { type: 'number', precision: 10 } : { type: 'integer' };
+}
+
+const decimalTransformer: ValueTransformer = {
+  to: (value: number | null | undefined) => value,
+  from: (value: string | number | null) => (value === null ? null : Number(value)),
+};
+
+/**
+ * Exact decimals (latitude / longitude, accuracy, scores). DECIMAL on PostgreSQL, NUMBER(p,s)
+ * on Oracle; the drivers return strings, so the transformer keeps entities typed as `number`.
+ */
+export function decimalColumn(
+  precision: number,
+  scale: number,
+  dbType?: string,
+): Pick<ColumnOptions, 'type' | 'precision' | 'scale' | 'transformer'> {
+  return {
+    type: isOracle(dbType) ? 'number' : 'decimal',
+    precision,
+    scale,
+    transformer: decimalTransformer,
+  };
 }
 
 /** Column type strings for migrations (TypeORM Table API), per database. */
@@ -41,8 +71,10 @@ export interface MigrationColumnTypes {
   unicodeVarchar: string;
   longText: string;
   timestamp: string;
+  date: string;
   int: { type: string; precision?: number };
   bool: { type: string; precision?: number };
+  decimal: (precision: number, scale: number) => { type: string; precision: number; scale: number };
 }
 
 export function migrationColumnTypes(dbType: string): MigrationColumnTypes {
@@ -52,8 +84,10 @@ export function migrationColumnTypes(dbType: string): MigrationColumnTypes {
     unicodeVarchar: oracle ? 'nvarchar2' : 'varchar',
     longText: oracle ? 'clob' : 'text',
     timestamp: 'timestamp',
+    date: 'date',
     int: oracle ? { type: 'number', precision: 10 } : { type: 'integer' },
     bool: oracle ? { type: 'number', precision: 1 } : { type: 'smallint' },
+    decimal: (precision, scale) => ({ type: oracle ? 'number' : 'decimal', precision, scale }),
   };
 }
 

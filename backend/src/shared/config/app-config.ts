@@ -48,6 +48,18 @@ export class AppConfig {
     return this.config.get('AUTH_TEST_LOGIN_ENABLED', { infer: true });
   }
 
+  get jobs(): { enabled: boolean; pingRetentionDays: number } {
+    return {
+      enabled: this.config.get('JOBS_ENABLED', { infer: true }),
+      pingRetentionDays: this.config.get('PING_RETENTION_DAYS', { infer: true }),
+    };
+  }
+
+  /** Development / test only: password the sample seed sets for web sign-in roles. */
+  get seedWebPassword(): string | undefined {
+    return this.config.get('SEED_WEB_PASSWORD', { infer: true }) || undefined;
+  }
+
   get auth(): {
     accessSecret: string;
     refreshSecret: string;

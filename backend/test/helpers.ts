@@ -3,14 +3,16 @@
  * and seed staff directly (staff CRUD endpoints arrive in phase 1B).
  */
 import { INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import * as bcrypt from 'bcryptjs';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { OtpMessage, OtpSender } from '../src/modules/auth/otp/otp-sender';
+import { CorporationOffice } from '../src/modules/offices/entities/corporation-office.entity';
 import { Staff } from '../src/modules/staff/entities/staff.entity';
+import { Ward } from '../src/modules/wards/entities/ward.entity';
 import type { StaffRole } from '../src/shared/auth/roles';
 import { ENTITIES } from '../src/database/entities';
 import { randomUUID } from 'node:crypto';
@@ -34,12 +36,16 @@ export interface TestApp {
   otp: CapturingOtpSender;
 }
 
-export async function createTestApp(): Promise<TestApp> {
+/** Extra provider overrides for one suite, e.g. a FixedClock or a fake FaceVerifier. */
+export type TestOverrides = (builder: TestingModuleBuilder) => TestingModuleBuilder;
+
+export async function createTestApp(overrides?: TestOverrides): Promise<TestApp> {
   const otp = new CapturingOtpSender();
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+  let builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(OtpSender)
-    .useValue(otp)
-    .compile();
+    .useValue(otp);
+  if (overrides) builder = overrides(builder);
+  const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication({ bufferLogs: true });
   configureApp(app);
   await app.init();
@@ -52,7 +58,35 @@ export async function createTestApp(): Promise<TestApp> {
 
 /** Deletes every row, children before parents (TRUNCATE is refused with foreign keys). */
 export async function resetDatabase(dataSource: DataSource): Promise<void> {
-  const order = ['AuditLog', 'AuthSession', 'AuthOtp', 'Staff', 'CorporationOffice', 'Ward'];
+  const order = [
+    'AuditLog',
+    'AuthSession',
+    'AuthOtp',
+    'Message',
+    'ConversationParticipant',
+    'Conversation',
+    'Alert',
+    'Holiday',
+    'RegularizationRequest',
+    'LeaveRequest',
+    'TaskUpdate',
+    'Task',
+    'CitizenComplaint',
+    'SpotCheck',
+    'TamperEvent',
+    'LocationPing',
+    'AttendanceLog',
+    'LivenessChallenge',
+    'RouteSummary',
+    'WardDailySummary',
+    'JobLock',
+    'Shift',
+    'DailyAssignment',
+    'StandingRoster',
+    'Staff',
+    'CorporationOffice',
+    'Ward',
+  ];
   const byName = new Map(ENTITIES.map((e) => [e.name, e]));
   for (const name of order) {
     const entity = byName.get(name);
@@ -69,7 +103,14 @@ let phoneCounter = 0;
 
 export async function seedStaff(
   dataSource: DataSource,
-  fields: { role: StaffRole; employeeCode: string; homeWardId?: string | null; officeId?: string | null; password?: string },
+  fields: {
+    role: StaffRole;
+    employeeCode: string;
+    homeWardId?: string | null;
+    officeId?: string | null;
+    reportsToId?: string | null;
+    password?: string;
+  },
 ): Promise<Staff> {
   phoneCounter += 1;
   const now = new Date();
@@ -82,7 +123,7 @@ export async function seedStaff(
     role: fields.role,
     homeWardId: fields.homeWardId ?? null,
     officeId: fields.officeId ?? null,
-    reportsToId: null,
+    reportsToId: fields.reportsToId ?? null,
     department: null,
     shiftStart: '06:00',
     shiftEnd: '14:00',
@@ -98,10 +139,56 @@ export async function seedStaff(
   return staff;
 }
 
+/** Inserts an active ward directly (when the test is not about wards). Returns its id. */
+export async function insertWard(
+  dataSource: DataSource,
+  code: string,
+  boundary: object = SQUARE_BOUNDARY,
+): Promise<string> {
+  const now = new Date();
+  const ward: Ward = {
+    id: randomUUID(),
+    code,
+    name: `Ward ${code}`,
+    nameMr: `प्रभाग ${code}`,
+    zone: 'SANGLI',
+    boundaryGeojson: JSON.stringify(boundary),
+    isActive: true,
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await dataSource.getRepository(Ward).insert(ward);
+  return ward.id;
+}
+
 /** Signs in through the dev/test-only endpoint and returns the bearer header value. */
 export async function bearerFor(http: TestApp['http'], identifier: string): Promise<string> {
   const res = await http.post('/api/v1/auth/test-login').send({ identifier }).expect(200);
   return `Bearer ${res.body.accessToken as string}`;
+}
+
+export async function insertOffice(
+  dataSource: DataSource,
+  code: string,
+  premises: object = SQUARE_BOUNDARY,
+): Promise<string> {
+  const now = new Date();
+  const office: CorporationOffice = {
+    id: randomUUID(),
+    code,
+    name: `Office ${code}`,
+    nameMr: `कार्यालय ${code}`,
+    zone: 'SANGLI',
+    premisesGeojson: JSON.stringify(premises),
+    bufferMeters: 100,
+    isActive: true,
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await dataSource.getRepository(CorporationOffice).insert(office);
+  return office.id;
 }
 
 export const SQUARE_BOUNDARY = {

@@ -14,7 +14,13 @@ import type {
   WardPageDto,
 } from './dto/ward.dto';
 import { Ward } from './entities/ward.entity';
-import { checkLocationInWard, normalizeWardCode, parseWardBoundary } from './wards.policy';
+import {
+  checkLocationInWard,
+  GeoPoint,
+  LocationCheck,
+  normalizeWardCode,
+  parseWardBoundary,
+} from './wards.policy';
 import { WardChanges, WardsRepository } from './wards.repository';
 
 export function toWardDto(ward: Ward): WardDto {
@@ -53,6 +59,38 @@ export class WardsService {
     return toWardDto(await this.findOrThrow(id));
   }
 
+  /**
+   * The active ward containing a point (strictly inside first, else within the 25 m edge
+   * allowance), or null. SMKMC has about 20 wards, so a scan is cheap.
+   */
+  async locate(point: GeoPoint): Promise<{ id: string; code: string } | null> {
+    const [wards] = await this.wards.findPage(0, 1000);
+    const active = wards.filter((w) => Boolean(Number(w.isActive)));
+    const checks = active.map((w) => ({
+      w,
+      c: checkLocationInWard(parseWardBoundary(w.boundaryGeojson), point),
+    }));
+    const hit = checks.find((x) => x.c.inside) ?? checks.find((x) => x.c.withinTolerance);
+    return hit ? { id: hit.w.id, code: hit.w.code } : null;
+  }
+
+  /**
+   * For the attendance engine: a ward's geofence parsed once, to test many points (a ping
+   * batch) without re-reading the boundary. Null when the ward does not exist.
+   */
+  async geofence(id: string): Promise<((point: GeoPoint) => LocationCheck) | null> {
+    const ward = await this.wards.findById(id);
+    if (!ward) return null;
+    const boundary = parseWardBoundary(ward.boundaryGeojson);
+    return (point) => checkLocationInWard(boundary, point);
+  }
+
+  /** For other modules (staff links, rosters): does an active ward with this id exist? */
+  async exists(id: string): Promise<boolean> {
+    const ward = await this.wards.findById(id);
+    return ward !== null && Boolean(Number(ward.isActive));
+  }
+
   async create(dto: CreateWardDto): Promise<WardDto> {
     const code = normalizeWardCode(dto.code);
     if (await this.wards.findByCode(code)) {
@@ -75,7 +113,12 @@ export class WardsService {
 
     await this.uow.run(async (tx) => {
       await this.wards.insert(ward, tx);
-      await this.audit.write(tx, { action: 'WARD_CREATED', entityType: 'ward', entityId: ward.id, details: { code } });
+      await this.audit.write(tx, {
+        action: 'WARD_CREATED',
+        entityType: 'ward',
+        entityId: ward.id,
+        details: { code },
+      });
     });
     return toWardDto(ward);
   }
